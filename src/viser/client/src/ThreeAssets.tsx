@@ -10,6 +10,7 @@ import {
 } from "./WebsocketMessages";
 import { BatchedMeshHoverOutlines } from "./mesh/BatchedMeshHoverOutlines";
 import { MeshBasicMaterial } from "three";
+import { normalizeScale } from "./utils/normalizeScale";
 // @ts-ignore - troika-three-text doesn't have type definitions
 import { Text as TroikaText } from "troika-three-text";
 import { BatchedLabelManagerContext } from "./BatchedLabelManagerContext";
@@ -62,7 +63,7 @@ const PointCloudMaterial = /* @__PURE__ */ shaderMaterial(
 );
 
 export const PointCloud = React.forwardRef<
-  THREE.Points,
+  THREE.Group,
   PointCloudMessage & { children?: React.ReactNode }
 >(function PointCloud({ children, ...message }, ref) {
   const getThreeState = useThree((state) => state.get);
@@ -152,6 +153,11 @@ export const PointCloud = React.forwardRef<
     }[props.point_shape];
   }, [props.point_shape, material]);
 
+  // Compute a scalar scale factor for point size. For non-uniform scale,
+  // use geometric mean since points are rendered as circles.
+  const s = normalizeScale(props.scale);
+  const pointScaleFactor = Math.cbrt(s[0] * s[1] * s[2]);
+
   const rendererSize = new THREE.Vector2();
   useFrame(() => {
     // Match point scale to behavior of THREE.PointsMaterial().
@@ -159,7 +165,7 @@ export const PointCloud = React.forwardRef<
     // frustum meters height = math.tan(fov / 2.0) * z
     // point px height = (point meters height / math.tan(fov / 2.0) * actual height)  / z
     material.uniforms.scale.value =
-      (props.point_size /
+      ((props.point_size * pointScaleFactor) /
         Math.tan(
           (((getThreeState().camera as THREE.PerspectiveCamera).fov / 180.0) *
             Math.PI) /
@@ -169,14 +175,12 @@ export const PointCloud = React.forwardRef<
       getThreeState().gl.getPixelRatio();
   });
   return (
-    <points
-      frustumCulled={false}
-      ref={ref}
-      geometry={geometry}
-      material={material}
-    >
+    <group ref={ref}>
+      <group scale={normalizeScale(message.props.scale)}>
+        <points frustumCulled={false} geometry={geometry} material={material} />
+      </group>
       {children}
-    </points>
+    </group>
   );
 });
 
@@ -189,6 +193,7 @@ export const CoordinateFrame = React.forwardRef<
     axesRadius?: number;
     originRadius?: number;
     originColor?: number;
+    scale?: number | [number, number, number];
     children?: React.ReactNode;
   }
 >(function CoordinateFrame(
@@ -197,6 +202,7 @@ export const CoordinateFrame = React.forwardRef<
     axesLength = 0.5,
     axesRadius = 0.0125,
     originRadius = undefined,
+    scale = 1.0,
     originColor = 0xecec00,
     children,
   },
@@ -205,39 +211,48 @@ export const CoordinateFrame = React.forwardRef<
   originRadius = originRadius ?? axesRadius * 2;
   return (
     <group ref={ref}>
-      {showAxes && (
-        <>
-          <mesh
-            geometry={originGeom}
-            scale={new THREE.Vector3(originRadius, originRadius, originRadius)}
-          >
-            <meshBasicMaterial color={originColor} />
-            <OutlinesIfHovered />
-          </mesh>
-          <Instances limit={6}>
-            <meshBasicMaterial />
-            <cylinderGeometry args={[axesRadius, axesRadius, axesLength, 16]} />
-            <Instance
-              rotation={new THREE.Euler(0.0, 0.0, (3.0 * Math.PI) / 2.0)}
-              position={[0.5 * axesLength, 0.0, 0.0]}
-              color={0xcc0000}
+      <group scale={normalizeScale(scale)}>
+        {showAxes && (
+          <>
+            <mesh
+              geometry={originGeom}
+              scale={
+                new THREE.Vector3(originRadius, originRadius, originRadius)
+              }
             >
-              {/* unmountOnHide is needed to use OutlineIfHovered within <Instances />. */}
-              <OutlinesIfHovered unmountOnHide enableCreaseAngle />
-            </Instance>
-            <Instance position={[0.0, 0.5 * axesLength, 0.0]} color={0x00cc00}>
-              <OutlinesIfHovered unmountOnHide enableCreaseAngle />
-            </Instance>
-            <Instance
-              rotation={new THREE.Euler(Math.PI / 2.0, 0.0, 0.0)}
-              position={[0.0, 0.0, 0.5 * axesLength]}
-              color={0x0000cc}
-            >
-              <OutlinesIfHovered unmountOnHide enableCreaseAngle />
-            </Instance>
-          </Instances>
-        </>
-      )}
+              <meshBasicMaterial color={originColor} />
+              <OutlinesIfHovered />
+            </mesh>
+            <Instances limit={6}>
+              <meshBasicMaterial />
+              <cylinderGeometry
+                args={[axesRadius, axesRadius, axesLength, 16]}
+              />
+              <Instance
+                rotation={new THREE.Euler(0.0, 0.0, (3.0 * Math.PI) / 2.0)}
+                position={[0.5 * axesLength, 0.0, 0.0]}
+                color={0xcc0000}
+              >
+                {/* unmountOnHide is needed to use OutlineIfHovered within <Instances />. */}
+                <OutlinesIfHovered unmountOnHide enableCreaseAngle />
+              </Instance>
+              <Instance
+                position={[0.0, 0.5 * axesLength, 0.0]}
+                color={0x00cc00}
+              >
+                <OutlinesIfHovered unmountOnHide enableCreaseAngle />
+              </Instance>
+              <Instance
+                rotation={new THREE.Euler(Math.PI / 2.0, 0.0, 0.0)}
+                position={[0.0, 0.0, 0.5 * axesLength]}
+                color={0x0000cc}
+              >
+                <OutlinesIfHovered unmountOnHide enableCreaseAngle />
+              </Instance>
+            </Instances>
+          </>
+        )}
+      </group>
       {children}
     </group>
   );
@@ -255,6 +270,7 @@ export const InstancedAxes = React.forwardRef<
     batched_scales: Uint8Array | null;
     axes_length?: number;
     axes_radius?: number;
+    scale?: number | [number, number, number];
     children?: React.ReactNode;
   }
 >(function InstancedAxes(
@@ -264,6 +280,7 @@ export const InstancedAxes = React.forwardRef<
     batched_scales,
     axes_length = 0.5,
     axes_radius = 0.0125,
+    scale = 1.0,
     children,
   },
   ref,
@@ -449,44 +466,46 @@ export const InstancedAxes = React.forwardRef<
 
   return (
     <group ref={ref}>
-      <instancedMesh
-        ref={axesRef}
-        args={[cylinderGeom, material, numInstances]}
-      />
+      <group scale={normalizeScale(scale)}>
+        <instancedMesh
+          ref={axesRef}
+          args={[cylinderGeom, material, numInstances]}
+        />
 
-      {/* Create hover outlines for each axis */}
-      <BatchedMeshHoverOutlines
-        geometry={outlineCylinderGeom}
-        batched_positions={batched_positions}
-        batched_wxyzs={batched_wxyzs}
-        batched_scales={batched_scales}
-        meshTransform={xAxisTransform}
-        computeBatchIndexFromInstanceIndex={(instanceId) =>
-          Math.floor(instanceId / 3)
-        }
-      />
+        {/* Create hover outlines for each axis */}
+        <BatchedMeshHoverOutlines
+          geometry={outlineCylinderGeom}
+          batched_positions={batched_positions}
+          batched_wxyzs={batched_wxyzs}
+          batched_scales={batched_scales}
+          meshTransform={xAxisTransform}
+          computeBatchIndexFromInstanceIndex={(instanceId) =>
+            Math.floor(instanceId / 3)
+          }
+        />
 
-      <BatchedMeshHoverOutlines
-        geometry={outlineCylinderGeom}
-        batched_positions={batched_positions}
-        batched_wxyzs={batched_wxyzs}
-        batched_scales={batched_scales}
-        meshTransform={yAxisTransform}
-        computeBatchIndexFromInstanceIndex={(instanceId) =>
-          Math.floor(instanceId / 3)
-        }
-      />
+        <BatchedMeshHoverOutlines
+          geometry={outlineCylinderGeom}
+          batched_positions={batched_positions}
+          batched_wxyzs={batched_wxyzs}
+          batched_scales={batched_scales}
+          meshTransform={yAxisTransform}
+          computeBatchIndexFromInstanceIndex={(instanceId) =>
+            Math.floor(instanceId / 3)
+          }
+        />
 
-      <BatchedMeshHoverOutlines
-        geometry={outlineCylinderGeom}
-        batched_positions={batched_positions}
-        batched_wxyzs={batched_wxyzs}
-        batched_scales={batched_scales}
-        meshTransform={zAxisTransform}
-        computeBatchIndexFromInstanceIndex={(instanceId) =>
-          Math.floor(instanceId / 3)
-        }
-      />
+        <BatchedMeshHoverOutlines
+          geometry={outlineCylinderGeom}
+          batched_positions={batched_positions}
+          batched_wxyzs={batched_wxyzs}
+          batched_scales={batched_scales}
+          meshTransform={zAxisTransform}
+          computeBatchIndexFromInstanceIndex={(instanceId) =>
+            Math.floor(instanceId / 3)
+          }
+        />
+      </group>
       {children}
     </group>
   );
@@ -515,24 +534,26 @@ export const ViserImage = React.forwardRef<
   }, [message.props._format, message.props._data]);
   return (
     <group ref={ref}>
-      <mesh
-        rotation={new THREE.Euler(Math.PI, 0.0, 0.0)}
-        castShadow={message.props.cast_shadow}
-        receiveShadow={message.props.receive_shadow === true}
-      >
-        <OutlinesIfHovered />
-        <planeGeometry
-          attach="geometry"
-          args={[message.props.render_width, message.props.render_height]}
-        />
-        <meshBasicMaterial
-          attach="material"
-          transparent={true}
-          side={THREE.DoubleSide}
-          map={imageTexture}
-          toneMapped={false}
-        />
-      </mesh>
+      <group scale={normalizeScale(message.props.scale)}>
+        <mesh
+          rotation={new THREE.Euler(Math.PI, 0.0, 0.0)}
+          castShadow={message.props.cast_shadow}
+          receiveShadow={message.props.receive_shadow === true}
+        >
+          <OutlinesIfHovered />
+          <planeGeometry
+            attach="geometry"
+            args={[message.props.render_width, message.props.render_height]}
+          />
+          <meshBasicMaterial
+            attach="material"
+            transparent={true}
+            side={THREE.DoubleSide}
+            map={imageTexture}
+            toneMapped={false}
+          />
+        </mesh>
+      </group>
       {children}
     </group>
   );
