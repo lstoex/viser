@@ -2686,8 +2686,8 @@ class SceneApi:
         if not name.startswith("/"):
             name = "/" + name
         handle = self._handle_from_node_name.get(name)
-        assert handle is not None, f"Scene node '{name}' does not exist."
-        handle.remove()
+        if handle is not None:
+            handle.remove()
 
     def show(self, height: int = 400, dark_mode: bool = False) -> None:
         """Display the scene in a Jupyter notebook or web browser.
